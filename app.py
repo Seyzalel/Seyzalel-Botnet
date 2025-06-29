@@ -7,7 +7,7 @@ from threading import Thread
 from math import exp
 from fake_useragent import UserAgent
 
-TARGET_URL = "http://example.com/api"
+TARGET_URL = "https://test.zoomov.cat/"
 POST_DATA = {"key": "value"}
 TIMEOUT = 3
 MAX_RPS = 5000
