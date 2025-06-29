@@ -1,7 +1,4 @@
-aiohttp
-httpx
-hyper
-tqdm
-numpy
-cryptography
 requests
+aiohttp
+cloudscraper
+fake_useragent
